@@ -7,24 +7,264 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rvest)
 ```
 
-## R Markdown
+For the sake of simple looping, we will use the `purrr::map()` function. `map` takes one input and will return a list.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+l = list(
+  vec_numeric = 1:4,
+  unif_sample = runif(100),
+  mat = matrix(1:8, nrow = 2, ncol = 4, byrow = TRUE),
+  summary = summary(rnorm(1000))
+)
 
-```{r cars}
-summary(cars)
 ```
 
-## Including Plots
+```{r}
 
-You can also embed plots, for example:
+l$mat
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+l[["mat"]][1,3]
+
+l[[1]]
+
+l[[4]]
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Making a list that's hopefully a bit more useful
+
+```{r}
+
+list_norm = 
+  list(
+    a = rnorm(20, 0, 5),
+    b = rnorm(20, 4, 5),
+    c = rnorm(20, 0, 10),
+    d = rnorm(20, 4, 10)
+  )
+
+```
+
+```{r}
+
+mean_and_sd = function(x) {
+  
+  if (!is.numeric(x)) {
+    stop("Argument x should be numeric")
+  } else if (length(x) == 1) {
+    stop("Cannot be computed for length 1 vectors")
+  }
+  
+  mean_x = mean(x)
+  sd_x = sd(x)
+
+ out_df = tibble(
+    mean = mean_x, 
+    sd = sd_x
+  )
+ 
+ return(out_df)
+}
+
+```
+
+```{r}
+
+mean_and_sd(list_norm[["a"]])
+mean_and_sd(list_norm[["b"]])
+mean_and_sd(list_norm[["c"]])
+mean_and_sd(list_norm[["d"]])
+
+```
+
+## Using a for loop
+
+#### Create output list and run a for loop
+
+```{r}
+
+output = vector("list", length = 4)
+
+for(i in 1:4) {
+  output[[i]] = mean_and_sd(list_norm[[i]])
+  return(output)
+}
+
+```
+
+#### Using map instead
+
+```{r}
+
+output = map(list_norm, mean_and_sd)
+
+```
+
+## List Columns
+
+```{r}
+
+listcol_df = 
+  tibble(
+    name = c("a", "b", "c", "d"),
+    samp = list_norm
+  )
+
+listcol_df
+
+listcol_df %>%
+  filter(name %in% c("a", "b"))
+
+listcol_df %>%
+  select(samp)
+
+```
+
+#### Here's how you can access the data again:
+
+```{r}
+
+listcol_df[["samp"]]
+listcol_df[["samp"]][["a"]]
+
+```
+
+#### Computing mean and SD:
+
+```{r}
+
+mean_and_sd(listcol_df[["samp"]][["a"]])
+
+map(listcol_df[["samp"]], mean_and_sd)
+
+```
+
+#### Add a list column into an existing data frame
+
+Note: `map_dbl()` returns doubles (numbers); `map()` only returns lists. If you want a simple output, you can use `map_dbl()`!
+
+```{r}
+
+listcol_df %>%
+  mutate(output = map(samp, mean_and_sd),
+         iqr = map_dbl(samp, IQR))
+
+listcol_df %>%
+  mutate(output = map(samp, mean_and_sd),
+         iqr = map_dbl(samp, IQR)) %>%
+  select(-samp) %>%
+  unnest(output)
+
+```
+
+## Revisiting the NSDUH table
+
+```{r}
+
+nsduh_table_format = function(html, table_num) {
+  
+  out_table =
+    html %>%
+    html_table %>%
+    nth(table_num) %>%
+    slice(-1) %>%
+    select(-contains("P Value"))
+  
+  return(out_table)
+}
+
+```
+
+#### 
+
+```{r}
+
+nsduh_url = "http://samhda.s3-us-gov-west-1.amazonaws.com/s3fs-public/field-uploads/2k15StateFiles/NSDUHsaeShortTermCHG2015.htm"
+
+nsduh_html = read_html(nsduh_url)
+
+```
+
+```{r}
+
+nsduh_table_format(html = nsduh_html, table_num = 1)
+nsduh_table_format(html = nsduh_html, table_num = 4)
+nsduh_table_format(html = nsduh_html, table_num = 5)
+
+```
+
+```{r}
+
+listcol_df_nsduh = 
+  tibble(
+    drug = c("Marijuana", "Cocaine", "Heroin"),
+    table_n = c(1, 4, 5)
+  ) %>% 
+  mutate(table = map(table_n, nsduh_table_format, html = nsduh_html)) %>%
+  unnest(table)
+
+listcol_df_nsduh
+
+```
+
+## Weather Example
+
+```{r}
+
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728", "USW00022534", "USS0023B17S"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2021-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(
+      id, 
+      USW00094728 = "CentralPark_NY", 
+      USW00022534 = "Molokai_HI",
+      USS0023B17S = "Waterhole_WA"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+
+```
+
+#### Create a List Column
+
+```{r}
+
+weather_nest = weather_df %>%
+  nest(data = date:tmin)
+
+```
+
+```{r}
+
+weather_nest[["data"]][[1]]
+
+```
+
+#### Regressing Tmax on Tmin
+
+```{r}
+
+lm(tmax ~ tmin, data = weather_nest[["data"]][[1]])
+lm(tmax ~ tmin, data = weather_nest[["data"]][[2]])
+lm(tmax ~ tmin, data = weather_nest[["data"]][[3]])
+
+```
+
+You can use `\(x)` to use `map()` with more complex functions:
+
+```{r}
+
+weather_nest %>%
+  mutate(model_fit = map(data, \(x) lm(tmax ~ tmin, data = x))) %>%
+  pull(model_fit)
+
+```
